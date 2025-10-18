@@ -1,0 +1,30 @@
+---
+- name: Install MariaDB
+  dnf:
+    name: mariadb105
+    state: present
+
+- name: Install required Python packages
+  pip:
+    name: PyMySQL
+    state: present
+
+- name: Crear base de datos para la aplicación
+  community.mysql.mysql_db:
+    login_host: "{{ db_login_host }}"
+    login_user: "{{ db_user_admin }}"
+    login_password: "{{ db_admin_password }}"
+    name: "{{ db_name }}"
+    state: present
+
+- name: Crear usuario de base de datos
+  community.mysql.mysql_user:
+    login_host: "{{ db_login_host }}"
+    login_user: "{{ db_user_admin }}"
+    login_password: "{{ db_admin_password }}"
+    name: "{{ db_new_user }}"
+    password: "{{ db_new_user_password }}"
+    host: '%'
+    priv: '{{ db_name }}.*:ALL'
+    state: present
+

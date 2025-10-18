@@ -1,0 +1,119 @@
+---
+- name: Instalar Python 3 y Git
+  ansible.builtin.dnf:
+    name:
+      - python3
+      - git
+    state: present
+
+- name: Verificar si el repo ya existe
+  stat:
+    path: /home/ec2-user/microblog/.git
+  register: repo_status
+
+- name: Clonar repositorio del proyecto Microblog 
+  git:
+    repo: "https://github.com/draconreyes/microblog.git"
+    dest: /home/ec2-user/microblog
+    version: main
+  become_user: ec2-user
+  when: not repo_status.stat.exists
+
+- name: Verificar si existe el entorno virtual
+  stat:
+    path: /home/ec2-user/microblog/venv/bin/activate
+  register: venv_status
+
+- name: (Opcional) Crear entorno virtual de Python
+  command: python3 -m venv venv
+  args:
+    chdir: /home/ec2-user/microblog
+  become_user: ec2-user
+  when:
+    - not venv_status.stat.exists
+
+- name: Instalar dependencias desde requirements.txt
+  pip:
+    requirements: /home/ec2-user/microblog/requirements.txt
+    virtualenv: /home/ec2-user/microblog/venv
+  become_user: ec2-user
+  when: create_virtualenv | default(true)
+
+- name: Crear carpeta 'env' dentro del proyecto
+  file:
+    path: /home/ec2-user/microblog/env
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+    mode: '0755'
+
+- name: Instalar amazon efs utils
+  ansible.builtin.dnf:
+    name: amazon-efs-utils
+
+- name: Montar sistema de archivos EFS en /home/ec2-user/env
+  become: true
+  mount:
+    path: /home/ec2-user/microblog/env
+    src: fs-0c682574b5c5bae85:/
+    fstype: efs
+    opts: tls
+    state: mounted
+
+- name: Crear archivo .env en EFS
+  template:
+    src: templates/env.j2
+    dest: /home/ec2-user/microblog/env/.env
+    owner: ec2-user
+    group: ec2-user
+    mode: '0600'
+    run_once: true
+
+- name: Asegurar que PyMySQL esté instalado en el entorno virtual
+  pip:
+    name: pymysql
+    virtualenv: /home/ec2-user/microblog/venv
+  become_user: ec2-user
+
+- name: Instalar Gunicorn en el entorno virtual
+  pip:
+    name: gunicorn
+    virtualenv: /home/ec2-user/microblog/venv
+
+- name: Ejecutar migraciones de base de datos con Flask
+  command: flask db upgrade
+  args:
+    chdir: /home/ec2-user/microblog
+  become: yes
+  become_user: ec2-user
+  run_once: true
+  environment:
+    PATH: "/home/ec2-user/microblog/venv/bin:{{ ansible_env.PATH }}"
+
+- name: Crear servicio systemd para Gunicorn
+  template:
+    src: templates/microblog.service.j2
+    dest: /etc/systemd/system/microblog.service
+    mode: '0644'
+
+- name: Habilitar y arrancar servicio
+  systemd:
+    name: microblog
+    enabled: yes
+    state: started
+
+- name: Instalar Nginx
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+
+- name: Configurar Nginx como proxy inverso
+  template:
+    src: templates/nginx.conf.j2
+    dest: /etc/nginx/conf.d/microblog.conf
+
+- name: Habilitar Nginx
+  systemd:
+    name: nginx
+    enabled: yes
+    state: started

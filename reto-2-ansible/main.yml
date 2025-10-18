@@ -1,0 +1,14 @@
+---
+- name: Create db
+  hosts: localhost
+  gather_facts: true
+  become: true
+  roles:
+    - database
+
+- name: Create app
+  hosts: app
+  become: true
+  roles:
+    - application
+    
